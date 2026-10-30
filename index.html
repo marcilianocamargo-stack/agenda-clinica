@@ -70,6 +70,10 @@ textarea{resize:vertical;}
 .action-btn{flex:1;padding:8px;border:none;border-radius:8px;cursor:pointer;font-weight:700;font-size:12px;}
 .action-btn.move{background:#ebf4ff;color:#3182ce;}
 .action-btn.del{background:#fff5f5;color:#c53030;}
+.action-btn.record{width:100%;margin-top:8px;background:#f3efff;color:#553c9a;}
+.record-item{background:#f7f8fa;border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+.record-date{font-weight:800;font-size:12px;color:#667eea;}
+.record-text{font-size:13px;color:#2d3748;white-space:pre-wrap;margin-top:4px;line-height:1.5;}
 .wa-btn{width:100%;margin-top:12px;background:#25D366;color:white;border:none;border-radius:10px;padding:10px;cursor:pointer;font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;gap:8px;}
 
 /* Empty state */
@@ -204,6 +208,7 @@ const state = {
   patients:[], sessions:[],
   profile:{ name:"", crp:"" }, showProfile:false, profileForm:{ name:"", crp:"" },
   showBackup:false, backupText:"",
+  recordPatient:null, recordForm:{ id:"", date:toDS(today), text:"" },
   expandedSession:null,
   showAddPatient:false, showSessionModal:false,
   sessionModalDate: toDS(today),
@@ -347,6 +352,36 @@ function saveProfile(){
   closeProfile();
 }
 
+// ── PRONTUÁRIO ──
+function newRecordForm(){ return { id:"", date:toDS(new Date()), text:"" }; }
+function openRecord(pid){ state.recordPatient=pid; state.recordForm=newRecordForm(); render(); }
+function closeRecord(){ state.recordPatient=null; render(); }
+function editRecord(rid){
+  const p=state.patients.find(x=>x.id===state.recordPatient);
+  const r=p&&(p.records||[]).find(x=>x.id===rid);
+  if(!r) return;
+  state.recordForm={...r}; render();
+  const box=document.querySelector(".modal-box"); if(box) box.scrollTop=0;
+}
+function cancelRecordEdit(){ state.recordForm=newRecordForm(); render(); }
+function saveRecord(){
+  const f=state.recordForm;
+  if(!f.text.trim()||!f.date){ alert("Escolha a data e escreva o registro."); return; }
+  const rec={id:f.id||gid(),date:f.date,text:f.text.trim()};
+  state.patients=state.patients.map(p=>{
+    if(p.id!==state.recordPatient) return p;
+    const recs=p.records||[];
+    return {...p,records:f.id?recs.map(r=>r.id===f.id?rec:r):[...recs,rec]};
+  });
+  state.recordForm=newRecordForm(); save(); render();
+}
+function deleteRecord(rid){
+  if(!confirm("Excluir este registro do prontuário?\n\nNão dá para desfazer.")) return;
+  state.patients=state.patients.map(p=>p.id===state.recordPatient?{...p,records:(p.records||[]).filter(r=>r.id!==rid)}:p);
+  if(state.recordForm.id===rid) state.recordForm=newRecordForm();
+  save(); render();
+}
+
 // ── BACKUP ──
 function backupData(){ return {app:"agenda-clinica",version:1,exportedAt:new Date().toISOString(),patients:state.patients,sessions:state.sessions,profile:state.profile}; }
 function openBackup(){ state.showProfile=false; state.showBackup=true; state.backupText=""; render(); }
@@ -432,6 +467,7 @@ function sessionCard(s){
         <button class="action-btn move" onclick="openEditSession_${s.id}()">🗓 Mover dia</button>
         <button class="action-btn del" onclick="deleteSession('${s.id}')">🗑 Excluir sessão</button>
       </div>
+      <button class="action-btn record" onclick="openRecord('${p.id}')">📋 Prontuário${(p.records||[]).length?" ("+p.records.length+")":""}</button>
       <button class="del-patient-btn" onclick="deletePatient('${p.id}')">🚫 Excluir paciente da agenda</button>
     </div>`;
   }
@@ -573,6 +609,7 @@ function render(){
         </div>
         <button class="delete-btn" onclick="deletePatient('${p.id}')">🗑 Excluir paciente</button>
       </div>
+      <button class="action-btn record" onclick="openRecord('${p.id}')">📋 Prontuário${(p.records||[]).length?" ("+p.records.length+")":""}</button>
     </div>`).join("")||`<div class="empty" style="padding:40px"><strong>Nenhum paciente cadastrado</strong></div>`;
     content=`<div class="section-header">
       <span class="section-title">Pacientes (${state.patients.length})</span>
@@ -676,6 +713,29 @@ function render(){
         <button class="primary-btn" onclick="saveProfile()">Salvar</button>
         <button class="action-btn move" style="width:100%;margin-top:10px;padding:11px" onclick="openBackup()">💾 Backup dos dados</button>
       </div></div>`;
+  }
+
+  if(state.recordPatient){
+    const rp=state.patients.find(x=>x.id===state.recordPatient);
+    if(rp){
+      const f=state.recordForm;
+      const recs=(rp.records||[]).map((r,i)=>({r,i})).sort((a,b)=>b.r.date.localeCompare(a.r.date)||b.i-a.i).map(x=>x.r);
+      const list=recs.map(r=>`<div class="record-item">
+          <div class="record-date">${fmtBR(r.date)}</div>
+          <div class="record-text">${esc(r.text)}</div>
+          <div class="action-btns"><button class="action-btn move" onclick="editRecord('${r.id}')">✏️ Editar</button><button class="action-btn del" onclick="deleteRecord('${r.id}')">🗑 Excluir</button></div>
+        </div>`).join("")||`<div class="no-sessions">Nenhum registro ainda</div>`;
+      modals+=`<div class="modal-overlay" onclick="if(event.target===this)closeRecord()">
+        <div class="modal-box">
+          <div class="modal-title-row"><span class="modal-title">📋 Prontuário — ${esc(rp.name)}</span><button class="modal-close" onclick="closeRecord()">✕</button></div>
+          <div class="form-group"><label class="form-label">${f.id?"Editando registro":"Novo registro"} — data</label><input type="date" class="form-input" value="${f.date}" onchange="state.recordForm.date=this.value"/></div>
+          <div class="form-group"><textarea class="notes-area" style="min-height:140px;margin-top:0" placeholder="Escreva aqui o registro do atendimento..." oninput="state.recordForm.text=this.value">${esc(f.text)}</textarea></div>
+          <button class="primary-btn" onclick="saveRecord()">${f.id?"Salvar alterações":"Salvar registro"}</button>
+          ${f.id?`<button class="action-btn move" style="width:100%;margin-top:8px;padding:11px" onclick="cancelRecordEdit()">Cancelar edição</button>`:""}
+          <div class="form-label" style="margin:18px 0 8px">Registros (${recs.length})</div>
+          ${list}
+        </div></div>`;
+    }
   }
 
   if(state.showBackup){
