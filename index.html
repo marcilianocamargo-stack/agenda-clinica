@@ -203,6 +203,7 @@ const state = {
   currentDate: new Date(today),
   patients:[], sessions:[],
   profile:{ name:"", crp:"" }, showProfile:false, profileForm:{ name:"", crp:"" },
+  showBackup:false, backupText:"",
   expandedSession:null,
   showAddPatient:false, showSessionModal:false,
   sessionModalDate: toDS(today),
@@ -344,6 +345,48 @@ function saveProfile(){
   state.profile={name:state.profileForm.name.trim(),crp:state.profileForm.crp.trim()};
   localStorage.setItem("ac_profile",JSON.stringify(state.profile));
   closeProfile();
+}
+
+// ── BACKUP ──
+function backupData(){ return {app:"agenda-clinica",version:1,exportedAt:new Date().toISOString(),patients:state.patients,sessions:state.sessions,profile:state.profile}; }
+function openBackup(){ state.showProfile=false; state.showBackup=true; state.backupText=""; render(); }
+function closeBackup(){ state.showBackup=false; render(); }
+async function exportBackup(){
+  const name="agenda-backup-"+toDS(new Date())+".json";
+  const file=new File([JSON.stringify(backupData(),null,2)],name,{type:"application/json"});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:"Backup da agenda"}); return; }
+  }catch(e){ if(e&&e.name==="AbortError") return; }
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(file); a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+function copyBackup(){
+  navigator.clipboard?.writeText(JSON.stringify(backupData()))
+    .then(()=>alert("Backup copiado! Cole em outro aparelho em Meu perfil > Backup > Colar backup."))
+    .catch(()=>alert("Não foi possível copiar. Use \"Salvar arquivo\"."));
+}
+function applyBackup(text){
+  let d;
+  try{ d=JSON.parse(text); }catch(e){ alert("Esse backup não é válido."); return; }
+  if(!d||!Array.isArray(d.patients)||!Array.isArray(d.sessions)){ alert("Esse backup não é válido."); return; }
+  const msg="Importar "+d.patients.length+" paciente(s) e "+d.sessions.length+" sessão(ões)?\n\nIsso substitui o que está salvo agora neste aparelho ("+state.patients.length+" paciente(s), "+state.sessions.length+" sessão(ões)).";
+  if(!confirm(msg)) return;
+  state.patients=d.patients; state.sessions=d.sessions;
+  if(d.profile&&typeof d.profile==="object"&&!state.profile.name){
+    state.profile=Object.assign({name:"",crp:""},d.profile);
+    localStorage.setItem("ac_profile",JSON.stringify(state.profile));
+  }
+  state.expandedSession=null; state.showBackup=false;
+  save(); render();
+  alert("Backup importado!");
+}
+function importFile(input){
+  const f=input.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>applyBackup(r.result);
+  r.readAsText(f); input.value="";
 }
 
 function financeData(){
@@ -631,6 +674,24 @@ function render(){
         <div class="form-group"><label class="form-label">CRP</label><input class="form-input" placeholder="Ex: 00/00000" value="${esc(state.profileForm.crp)}" oninput="state.profileForm.crp=this.value"/></div>
         <div style="font-size:12px;color:#718096;margin-bottom:8px">Aparece no topo do app, na assinatura do lembrete de WhatsApp e no relatório. Fica salvo só neste aparelho.</div>
         <button class="primary-btn" onclick="saveProfile()">Salvar</button>
+        <button class="action-btn move" style="width:100%;margin-top:10px;padding:11px" onclick="openBackup()">💾 Backup dos dados</button>
+      </div></div>`;
+  }
+
+  if(state.showBackup){
+    modals+=`<div class="modal-overlay" onclick="if(event.target===this)closeBackup()">
+      <div class="modal-box">
+        <div class="modal-title-row"><span class="modal-title">Backup dos dados</span><button class="modal-close" onclick="closeBackup()">✕</button></div>
+        <div style="font-size:12px;color:#718096;margin-bottom:12px">Os dados ficam salvos só neste aparelho. Faça backup de vez em quando e antes de trocar de celular.</div>
+        <div class="form-label">Salvar</div>
+        <div class="action-btns" style="margin-top:4px;margin-bottom:16px">
+          <button class="action-btn move" onclick="exportBackup()">📤 Salvar arquivo</button>
+          <button class="action-btn move" onclick="copyBackup()">📋 Copiar texto</button>
+        </div>
+        <div class="form-label">Restaurar</div>
+        <label class="action-btn move" style="display:block;text-align:center;margin-top:4px;margin-bottom:10px;cursor:pointer">📥 Escolher arquivo de backup<input type="file" accept=".json,application/json" style="display:none" onchange="importFile(this)"/></label>
+        <textarea class="notes-area" placeholder="Ou cole aqui o backup copiado..." oninput="state.backupText=this.value"></textarea>
+        <button class="primary-btn" style="margin-top:10px" onclick="applyBackup(state.backupText)">Colar backup</button>
       </div></div>`;
   }
 
